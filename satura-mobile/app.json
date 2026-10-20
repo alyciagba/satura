@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Satura",
+    "slug": "satura",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "satura",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#EEECDE"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.satura.paletas"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundColor": "#EEECDE"
+      },
+      "package": "com.satura.paletas"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Satura precisa de acesso às suas fotos para extrair paletas de cores incríveis.",
+          "cameraPermission": "O Satura precisa de acesso à câmera para você fotografar e criar paletas a partir do mundo real."
+        }
+      ],
+      "expo-asset"
+    ]
+  }
+}
