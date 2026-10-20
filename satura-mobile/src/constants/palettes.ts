@@ -103,57 +103,16 @@ export function buildPaletteColors(hexList: string[], purpose: string): PaletteC
   });
 }
 
-// Paletas iniciais pré-carregadas para demonstração acadêmica
-export const INITIAL_PALETTES: SavedPalette[] = [
-  {
-    id: "demo-paleta-1",
-    name: "Identidade Satura",
-    purpose: "Projeto de design",
-    mood: "Elegante e sofisticada",
-    tone: "Tons claros",
-    savedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    source: "questionario",
-    colors: [
-      { name: "Principal (Verde Satura)", hex: "#16645F" },
-      { name: "Complementar (Rosa Orquídea)", hex: "#FF6B9A" },
-      { name: "Apoio (Dourado Pôr do Sol)", hex: "#FFB35C" },
-      { name: "Neutro (Linho Suave)", hex: "#EEECDE" },
-      { name: "Destaque (Violeta Elétrico)", hex: "#7B61FF" },
-    ],
-  },
-  {
-    id: "demo-paleta-2",
-    name: "Jardim Botânico",
-    purpose: "Meu estilo pessoal",
-    mood: "Calma e natural",
-    tone: "Tons claros",
-    savedAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    source: "imagem",
-    colors: [
-      { name: "Principal (Verde Floresta)", hex: "#123C3A" },
-      { name: "Complementar (Menta Fresca)", hex: "#72D6B0" },
-      { name: "Apoio (Sálvia Serena)", hex: "#B8D8BA" },
-      { name: "Neutro (Creme Suave)", hex: "#FEFAE0" },
-      { name: "Destaque (Terracota Quente)", hex: "#B7795B" },
-    ],
-  },
-];
-
 export async function loadSavedPalettes(): Promise<SavedPalette[]> {
   try {
-    const stored = await AsyncStorage.getItem(SAVED_PALETTES_STORAGE_KEY);
-    if (!stored) {
-      // Inicializa com demonstrações para visualização imediata
-      await saveSavedPalettes(INITIAL_PALETTES);
-      return INITIAL_PALETTES;
-    }
-    const parsed = JSON.parse(stored);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed as SavedPalette[];
-    }
+    const storageKey = await getCurrentUserPalettesKey();
+    if (!storageKey) return [];
 
-    await saveSavedPalettes(INITIAL_PALETTES);
-    return INITIAL_PALETTES;
+    const stored = await AsyncStorage.getItem(storageKey);
+    if (!stored) return [];
+
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) ? (parsed as SavedPalette[]) : [];
   } catch (error) {
     console.error("Erro ao carregar paletas:", error);
     return [];
@@ -162,9 +121,15 @@ export async function loadSavedPalettes(): Promise<SavedPalette[]> {
 
 export async function saveSavedPalettes(palettes: SavedPalette[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(SAVED_PALETTES_STORAGE_KEY, JSON.stringify(palettes));
+    const storageKey = await getCurrentUserPalettesKey();
+    if (!storageKey) {
+      throw new Error("Não é possível salvar paletas sem uma sessão ativa.");
+    }
+
+    await AsyncStorage.setItem(storageKey, JSON.stringify(palettes));
   } catch (error) {
     console.error("Erro ao salvar paletas:", error);
+    throw error;
   }
 }
 
@@ -180,4 +145,17 @@ export async function removeSavedPalette(id: string): Promise<SavedPalette[]> {
   const remaining = current.filter((palette) => palette.id !== id);
   await saveSavedPalettes(remaining);
   return remaining;
+}
+
+async function getCurrentUserPalettesKey(): Promise<string | null> {
+  const session = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
+  if (!session) return null;
+
+  const parsed: unknown = JSON.parse(session);
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const email = (parsed as Record<string, unknown>).email;
+  if (typeof email !== "string" || !email.trim()) return null;
+
+  return `${SAVED_PALETTES_STORAGE_KEY}:${encodeURIComponent(email.trim().toLowerCase())}`;
 }

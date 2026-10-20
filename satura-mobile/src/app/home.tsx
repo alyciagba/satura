@@ -17,7 +17,6 @@ import { Colors, Fonts } from "@/constants/theme";
 import { BarraNavegacao } from "@/components/BarraNavegacao";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { checkSession, getStoredUser } from "@/services/storage";
-import { hexToRgb } from "@/utils/colors";
 import { getPaletteResultParams } from "@/utils/paletteNavigation";
 
 export default function HomeScreen() {

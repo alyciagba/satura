@@ -19,7 +19,6 @@ import {
 import { BarraNavegacao } from "@/components/BarraNavegacao";
 import { Colors, Fonts } from "@/constants/theme";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
-import { hexToRgb } from "@/utils/colors";
 import { getPaletteResultParams } from "@/utils/paletteNavigation";
 
 export default function PaletasSalvasScreen() {

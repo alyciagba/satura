@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { USER_PROFILE_STORAGE_KEY, SESSION_STORAGE_KEY, type UserProfile } from "@/constants/palettes";
+import { USER_PROFILE_STORAGE_KEY, SESSION_STORAGE_KEY } from "@/constants/palettes";
 
 export interface StoredUser {
   name: string;
@@ -8,22 +8,24 @@ export interface StoredUser {
   createdAt: string;
 }
 
-const DEFAULT_DEMO_USER: StoredUser = {
-  name: "Gabriela",
-  email: "gabriela@satura.com",
-  passwordHash: "123456",
-  createdAt: new Date().toISOString(),
+type StoredSession = {
+  email: string;
+  name: string;
 };
 
 export async function getStoredUser(): Promise<StoredUser | null> {
   try {
     const raw = await AsyncStorage.getItem(USER_PROFILE_STORAGE_KEY);
-    if (!raw) {
-      // Inicia com usuário de exemplo para testes imediatos
-      await AsyncStorage.setItem(USER_PROFILE_STORAGE_KEY, JSON.stringify(DEFAULT_DEMO_USER));
-      return DEFAULT_DEMO_USER;
-    }
-    return JSON.parse(raw);
+    if (!raw) return null;
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!isStoredUser(parsed)) return null;
+
+    return {
+      ...parsed,
+      name: parsed.name.trim(),
+      email: normalizeEmail(parsed.email),
+    };
   } catch {
     return null;
   }
@@ -32,20 +34,28 @@ export async function getStoredUser(): Promise<StoredUser | null> {
 export async function saveNewUser(name: string, email: string, password: string): Promise<StoredUser> {
   const newUser: StoredUser = {
     name: name.trim(),
-    email: email.trim().toLowerCase(),
+    email: normalizeEmail(email),
     passwordHash: password,
     createdAt: new Date().toISOString(),
   };
+
   await AsyncStorage.setItem(USER_PROFILE_STORAGE_KEY, JSON.stringify(newUser));
-  await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ email: newUser.email, name: newUser.name }));
+  await saveSession(newUser);
   return newUser;
 }
 
-export async function checkSession(): Promise<{ email: string; name: string } | null> {
+export async function checkSession(): Promise<StoredSession | null> {
   try {
     const session = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
     if (!session) return null;
-    return JSON.parse(session);
+
+    const parsed: unknown = JSON.parse(session);
+    if (!isStoredSession(parsed)) return null;
+
+    return {
+      email: normalizeEmail(parsed.email),
+      name: parsed.name.trim(),
+    };
   } catch {
     return null;
   }
@@ -57,8 +67,8 @@ export async function login(email: string, password: string): Promise<{ success:
     return { success: false, message: "Nenhum usuário cadastrado neste dispositivo." };
   }
 
-  const cleanEmail = email.trim().toLowerCase();
-  if (stored.email.toLowerCase() !== cleanEmail) {
+  const cleanEmail = normalizeEmail(email);
+  if (stored.email !== cleanEmail) {
     return { success: false, message: "E-mail não cadastrado neste dispositivo." };
   }
 
@@ -66,12 +76,43 @@ export async function login(email: string, password: string): Promise<{ success:
     return { success: false, message: "Senha incorreta. Tente novamente." };
   }
 
-  await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ email: stored.email, name: stored.name }));
+  await saveSession(stored);
   return { success: true, user: { name: stored.name, email: stored.email } };
 }
 
 export async function logout(): Promise<void> {
   await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function isStoredUser(value: unknown): value is StoredUser {
+  if (!value || typeof value !== "object") return false;
+
+  const user = value as Record<string, unknown>;
+  return (
+    typeof user.name === "string" &&
+    typeof user.email === "string" &&
+    typeof user.passwordHash === "string" &&
+    typeof user.createdAt === "string"
+  );
+}
+
+function isStoredSession(value: unknown): value is StoredSession {
+  if (!value || typeof value !== "object") return false;
+
+  const session = value as Record<string, unknown>;
+  return typeof session.email === "string" && typeof session.name === "string";
+}
+
+async function saveSession(user: Pick<StoredUser, "email" | "name">): Promise<void> {
+  const session: StoredSession = {
+    email: normalizeEmail(user.email),
+    name: user.name.trim(),
+  };
+  await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
 export interface AppSettings {
