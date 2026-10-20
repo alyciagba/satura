@@ -1,3 +1,4 @@
+
 {
   "expo": {
     "name": "Satura",
@@ -7,11 +8,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "satura",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#EEECDE"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.satura.paletas"
@@ -32,7 +28,16 @@
           "cameraPermission": "O Satura precisa de acesso à câmera para você fotografar e criar paletas a partir do mundo real."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#EEECDE"
+        }
+      ]
     ]
   }
 }
