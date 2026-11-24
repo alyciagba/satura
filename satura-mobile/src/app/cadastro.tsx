@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { Colors, Fonts } from "@/constants/theme";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
-import { saveNewUser } from "@/services/storage";
+import { signUp } from "@/services/auth";
 
 export default function CadastroScreen() {
   const router = useRouter();
@@ -25,8 +25,11 @@ export default function CadastroScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const isSubmitting = useRef(false);
 
   async function handleRegister() {
+    if (isSubmitting.current) return;
+
     setErrorMessage(null);
 
     // Validações
@@ -56,8 +59,8 @@ export default function CadastroScreen() {
       return;
     }
 
-    if (password.length < 4) {
-      setErrorMessage("A senha deve possuir ao menos 4 dígitos para esta demonstração.");
+    if (password.length < 6) {
+      setErrorMessage("A senha deve possuir ao menos 6 caracteres.");
       return;
     }
 
@@ -66,12 +69,38 @@ export default function CadastroScreen() {
       return;
     }
 
+    isSubmitting.current = true;
     setIsLoading(true);
     try {
-      await saveNewUser(name, email, password);
+      const result = await signUp(name, email, password);
+      if (result.error) {
+        setErrorMessage(result.error.message);
+        return;
+      }
+
+      if (!result.data?.user) {
+        setErrorMessage("Não foi possível concluir o cadastro. Tente novamente.");
+        return;
+      }
+
+      if (result.data.user.identities?.length === 0) {
+        setErrorMessage(
+          "Este e-mail já está associado a uma conta. Tente entrar ou use outro e-mail."
+        );
+        return;
+      }
+
+      if (!result.data.session) {
+        Alert.alert(
+          "Confirme seu e-mail",
+          `Enviamos um link de confirmação para ${email.trim()}. Confirme seu e-mail antes de entrar no Satura.`
+        );
+        return;
+      }
+
       Alert.alert(
         "Conta criada com sucesso! ✨",
-        `Bem-vindo(a) ao Satura, ${name.trim()}! Seus dados foram salvos localmente neste aparelho.`,
+        `Bem-vindo(a) ao Satura, ${name.trim()}!`,
         [
           {
             text: "Começar a usar",
@@ -80,8 +109,9 @@ export default function CadastroScreen() {
         ]
       );
     } catch {
-      setErrorMessage("Não foi possível salvar o cadastro localmente. Tente novamente.");
+      setErrorMessage("Não foi possível concluir o cadastro. Verifique sua conexão e tente novamente.");
     } finally {
+      isSubmitting.current = false;
       setIsLoading(false);
     }
   }
@@ -176,7 +206,7 @@ export default function CadastroScreen() {
           </Text>
           <TextInput
             style={[styles.input, errorMessage && !password && styles.inputError]}
-            placeholder="Mínimo 4 caracteres"
+            placeholder="Mínimo 6 caracteres"
             placeholderTextColor="#8A8B84"
             secureTextEntry
             value={password}
@@ -210,13 +240,13 @@ export default function CadastroScreen() {
             onPress={handleRegister}
             disabled={isLoading}
             accessibilityRole="button"
-            accessibilityLabel="Criar conta local no dispositivo"
+            accessibilityLabel="Criar conta no Satura"
             accessibilityState={{ busy: isLoading }}
           >
             {isLoading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.buttonText}>Cadastrar e entrar</Text>
+              <Text style={styles.buttonText}>Criar conta</Text>
             )}
           </TouchableOpacity>
 
@@ -232,8 +262,7 @@ export default function CadastroScreen() {
           </TouchableOpacity>
 
           <Text style={styles.privacyNotice}>
-            Cadastro demonstrativo offline para a disciplina de Tecnologia Web para Negócios.
-            Nenhum dado é transmitido para a internet.
+            Confirme seu e-mail antes de entrar. Os dados de cadastro são enviados ao serviço de autenticação do Satura.
           </Text>
         </View>
       </ScrollView>
@@ -260,15 +289,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    rowGap: 8,
     marginBottom: 20,
   },
   backButton: {
-    width: 42,
-    height: 42,
+    minWidth: 42,
+    minHeight: 42,
     borderRadius: 14,
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: "#D8D5C7",
     shadowColor: "#000",
@@ -290,6 +323,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 4,
     color: Colors.primary,
+    flexShrink: 1,
   },
   placeholder: {
     width: 44,
@@ -302,7 +336,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 2,
-    color: Colors.accentPink,
+    color: Colors.accentPinkDark,
     marginBottom: 8,
   },
   title: {

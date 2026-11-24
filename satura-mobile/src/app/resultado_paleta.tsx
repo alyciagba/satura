@@ -1,18 +1,20 @@
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import {
-  addSavedPalette,
   buildPaletteColors,
   PALETTE_SETS,
   type PaletteColor,
@@ -21,6 +23,7 @@ import {
 import { BarraNavegacao } from "@/components/BarraNavegacao";
 import { Colors, Fonts } from "@/constants/theme";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
+import { addSavedPalette } from "@/services/palettes";
 import {
   getBestContrastTextColor,
   getClosestColorName,
@@ -32,6 +35,7 @@ import { generateHarmonicPalette } from "@/utils/paletteGenerator";
 
 export default function ResultadoPaletaScreen() {
   const router = useRouter();
+  const { fontScale } = useWindowDimensions();
   const params = useLocalSearchParams<{
     purpose?: string;
     mood?: string;
@@ -52,7 +56,7 @@ export default function ResultadoPaletaScreen() {
   const purpose = params.purpose ?? "Projeto de design";
   const mood = params.mood ?? "Calma e natural";
   const tone = params.tone ?? "Tons claros";
-  const source = (params.source as "questionario" | "imagem") ?? "questionario";
+  const source = params.source === "imagem" ? "imagem" : "questionario";
   const count = params.count === "3" ? 3 : params.count === "6" ? 6 : 5;
 
   // Montagem da paleta e explicação produzida pela mesma lógica do questionário.
@@ -133,6 +137,8 @@ export default function ResultadoPaletaScreen() {
     params.name ?? (source === "imagem" ? "Paleta Fotográfica" : `${mood} — ${purpose}`)
   );
   const [saved, setSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const { highContrast } = useAppSettings();
 
   async function copyColor(hex: string) {
@@ -146,11 +152,16 @@ export default function ResultadoPaletaScreen() {
   }
 
   async function handleSavePalette() {
+    if (isSavingRef.current) return;
+
     const trimmed = paletteName.trim();
     if (!trimmed) {
       Alert.alert("Nome obrigatório", "Por favor, digite um nome para a sua paleta.");
       return;
     }
+
+    isSavingRef.current = true;
+    setIsSaving(true);
 
     const newSaved: SavedPalette = {
       id: `${Date.now()}`,
@@ -164,21 +175,39 @@ export default function ResultadoPaletaScreen() {
       explanation: generatedPalette.explanation,
     };
 
-    await addSavedPalette(newSaved);
-    setSaved(true);
-    setNameModalVisible(false);
+    try {
+      const result = await addSavedPalette(newSaved);
+      if (result.error || !result.data) {
+        Alert.alert(
+          "Não foi possível salvar a paleta",
+          result.error?.message ?? "Tente novamente mais tarde."
+        );
+        return;
+      }
 
-    Alert.alert(
-      "Paleta salva com sucesso! 🎨",
-      `"${trimmed}" está disponível na aba "Paletas Salvas" do seu dispositivo.`,
-      [
-        {
-          text: "Ver minhas paletas",
-          onPress: () => router.push("/paletas_salvas"),
-        },
-        { text: "Continuar aqui", style: "cancel" },
-      ]
-    );
+      setSaved(true);
+      setNameModalVisible(false);
+
+      Alert.alert(
+        "Paleta salva com sucesso! 🎨",
+        `"${trimmed}" está disponível na sua conta do Satura.`,
+        [
+          {
+            text: "Ver minhas paletas",
+            onPress: () => router.push("/paletas_salvas"),
+          },
+          { text: "Continuar aqui", style: "cancel" },
+        ]
+      );
+    } catch {
+      Alert.alert(
+        "Não foi possível salvar a paleta",
+        "Ocorreu um erro ao salvar. Tente novamente."
+      );
+    } finally {
+      isSavingRef.current = false;
+      setIsSaving(false);
+    }
   }
 
   const harmonyExplanation = generatedPalette.explanation;
@@ -216,7 +245,10 @@ export default function ResultadoPaletaScreen() {
 
         {/* Faixa visual contínua das cores */}
         <View
-          style={styles.swatchPreview}
+          style={[
+            styles.swatchPreview,
+            fontScale >= 1.4 && styles.swatchPreviewScaled,
+          ]}
           accessibilityLabel="Faixa contínua com todas as cores da paleta gerada"
         >
           {palette.map((color, index) => {
@@ -224,7 +256,12 @@ export default function ResultadoPaletaScreen() {
             return (
               <TouchableOpacity
                 key={`${color.hex}-${index}`}
-                style={[styles.previewColor, { backgroundColor: color.hex }]}
+                style={[
+                  styles.previewColor,
+                  fontScale >= 1.4 && styles.previewColorScaled,
+                  fontScale >= 2.4 && styles.previewColorVeryLarge,
+                  { backgroundColor: color.hex },
+                ]}
                 onPress={() => copyColor(color.hex)}
                 accessibilityRole="button"
                 accessibilityLabel={`Cor ${color.name}, toque para copiar ${color.hex}`}
@@ -247,7 +284,10 @@ export default function ResultadoPaletaScreen() {
             return (
               <View
                 key={`${color.hex}-${index}`}
-                style={styles.colorRow}
+                style={[
+                  styles.colorRow,
+                  fontScale >= 1.8 && styles.colorRowScaled,
+                ]}
                 accessible={true}
                 accessibilityLabel={`${color.name}. Hexadecimal ${color.hex}. RGB ${hexToRgb(color.hex)}`}
               >
@@ -289,10 +329,10 @@ export default function ResultadoPaletaScreen() {
           style={[styles.saveButton, saved && styles.savedButton]}
           onPress={() => setNameModalVisible(true)}
           accessibilityRole="button"
-          accessibilityLabel={saved ? "Paleta já salva, toque para renomear" : "Salvar paleta no dispositivo"}
+          accessibilityLabel={saved ? "Paleta já salva na sua conta, toque para renomear" : "Salvar paleta na sua conta"}
         >
           <Text style={styles.saveButtonText}>
-            {saved ? "✓ Paleta Salva no Aparelho" : "Salvar esta paleta"}
+            {saved ? "✓ Paleta salva na sua conta" : "Salvar esta paleta"}
           </Text>
         </TouchableOpacity>
 
@@ -325,46 +365,56 @@ export default function ResultadoPaletaScreen() {
         animationType="fade"
         onRequestClose={() => setNameModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Dê um nome à sua paleta</Text>
-            <Text style={styles.modalDescription}>
-              Escolha um nome fácil de lembrar para identificar esta combinação nas suas paletas salvas.
-            </Text>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            style={styles.modalScrollView}
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Dê um nome à sua paleta</Text>
+              <Text style={styles.modalDescription}>
+                Escolha um nome fácil de lembrar para identificar esta combinação nas suas paletas salvas.
+              </Text>
 
-            <TextInput
-              autoFocus
-              value={paletteName}
-              onChangeText={setPaletteName}
-              placeholder="Ex.: Identidade da Marca, Look de Verão..."
-              placeholderTextColor="#8A8B84"
-              style={styles.nameInput}
-              maxLength={45}
-              returnKeyType="done"
-              onSubmitEditing={handleSavePalette}
-              accessibilityLabel="Nome da paleta"
-            />
+              <TextInput
+                autoFocus
+                value={paletteName}
+                onChangeText={setPaletteName}
+                placeholder="Ex.: Identidade da Marca, Look de Verão..."
+                placeholderTextColor="#8A8B84"
+                style={styles.nameInput}
+                maxLength={45}
+                returnKeyType="done"
+                onSubmitEditing={handleSavePalette}
+                accessibilityLabel="Nome da paleta"
+              />
 
-            <TouchableOpacity
-              style={[styles.saveButton, !paletteName.trim() && styles.disabledButton]}
-              onPress={handleSavePalette}
-              disabled={!paletteName.trim()}
-              accessibilityRole="button"
-              accessibilityLabel="Confirmar e salvar paleta"
-            >
-              <Text style={styles.saveButtonText}>Confirmar e Salvar</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, !paletteName.trim() && styles.disabledButton]}
+                onPress={handleSavePalette}
+                disabled={!paletteName.trim() || isSaving}
+                accessibilityRole="button"
+                accessibilityLabel="Confirmar e salvar paleta"
+              >
+                <Text style={styles.saveButtonText}>Confirmar e Salvar</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => setNameModalVisible(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Cancelar salvamento"
-            >
-              <Text style={styles.cancelButtonText}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setNameModalVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancelar salvamento"
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       <BarraNavegacao />
@@ -388,14 +438,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    rowGap: 8,
   },
   backButton: {
-    width: 42,
-    height: 42,
+    minWidth: 42,
+    minHeight: 42,
     borderRadius: 14,
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: "#D8D5C7",
     shadowColor: "#000",
@@ -417,6 +471,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 4,
     color: Colors.primary,
+    flexShrink: 1,
   },
   stepBadge: {
     ...serifText,
@@ -435,7 +490,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 2,
-    color: Colors.accentPink,
+    color: Colors.accentPinkDark,
     marginBottom: 8,
   },
   title: {
@@ -454,7 +509,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   swatchPreview: {
-    height: 120,
+    minHeight: 120,
     flexDirection: "row",
     borderRadius: 20,
     overflow: "hidden",
@@ -462,17 +517,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.06)",
   },
+  swatchPreviewScaled: {
+    flexWrap: "wrap",
+  },
   previewColor: {
     flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "flex-end",
     paddingBottom: 10,
+  },
+  previewColorScaled: {
+    flexBasis: "47%",
+  },
+  previewColorVeryLarge: {
+    flexBasis: "100%",
   },
   previewHex: {
     ...serifText,
     fontSize: 9,
     fontWeight: "700",
     letterSpacing: 0.5,
+    flexShrink: 1,
+    textAlign: "center",
   },
   sectionTitle: {
     ...serifText,
@@ -494,6 +561,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E3D5",
   },
+  colorRowScaled: {
+    flexWrap: "wrap",
+  },
   colorSample: {
     width: 48,
     height: 48,
@@ -504,6 +574,7 @@ const styles = StyleSheet.create({
   },
   colorInfo: {
     flex: 1,
+    minWidth: 0,
   },
   colorName: {
     ...serifText,
@@ -531,6 +602,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F2F0E6",
     minHeight: 40,
     justifyContent: "center",
+    flexShrink: 1,
   },
   copyButtonActive: {
     backgroundColor: "#E2F4EC",
@@ -598,10 +670,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
+  modalScrollView: {
+    maxHeight: "100%",
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
   modalCard: {
     backgroundColor: Colors.card,
     borderRadius: 22,
     padding: 24,
+    width: "100%",
   },
   modalTitle: {
     ...serifText,

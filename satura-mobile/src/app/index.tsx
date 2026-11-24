@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Colors, Fonts } from "@/constants/theme";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
-import { checkSession, login } from "@/services/storage";
+import { getCurrentSession, signIn } from "@/services/auth";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -22,17 +22,43 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const isSubmitting = useRef(false);
 
-  // Verifica se já existe sessão salva
   useEffect(() => {
-    checkSession().then((session: { email: string; name: string } | null) => {
-      if (session) {
-        router.replace("/home");
+    let isMounted = true;
+
+    async function restoreSession() {
+      try {
+        const result = await getCurrentSession();
+        if (!isMounted) return;
+
+        if (result.error) {
+          setErrorMessage(result.error.message);
+        } else if (result.data) {
+          router.replace("/home");
+        }
+      } catch {
+        if (isMounted) {
+          setErrorMessage("Não foi possível verificar sua sessão. Tente novamente.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsCheckingSession(false);
+        }
       }
-    });
+    }
+
+    void restoreSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   async function handleLogin() {
+    if (isSubmitting.current) return;
+
     setErrorMessage(null);
 
     // Validações
@@ -52,19 +78,47 @@ export default function LoginScreen() {
       return;
     }
 
+    isSubmitting.current = true;
     setIsLoading(true);
     try {
-      const res = await login(email, password);
-      if (res.success) {
-        router.replace("/home");
-      } else {
-        setErrorMessage(res.message || "E-mail ou senha incorretos.");
+      const result = await signIn(email, password);
+      if (result.error) {
+        setErrorMessage(
+          result.error.code === "email_not_confirmed"
+            ? "Seu e-mail ainda não foi confirmado. Confirme-o antes de entrar."
+            : result.error.message
+        );
+        return;
       }
+
+      if (!result.data?.session) {
+        setErrorMessage(
+          "Não foi possível iniciar sua sessão. Confirme seu e-mail antes de entrar."
+        );
+        return;
+      }
+
+      router.replace("/home");
     } catch {
       setErrorMessage("Ocorreu um erro ao tentar entrar. Tente novamente.");
     } finally {
+      isSubmitting.current = false;
       setIsLoading(false);
     }
+  }
+
+  if (isCheckingSession) {
+    return (
+      <View
+        style={[
+          styles.container,
+          highContrast && styles.highContrastContainer,
+          { alignItems: "center", justifyContent: "center" },
+        ]}
+      >
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
   }
 
   return (
@@ -166,7 +220,7 @@ export default function LoginScreen() {
             style={styles.registerLink}
             onPress={() => router.push("/cadastro")}
             accessibilityRole="button"
-            accessibilityLabel="Criar uma nova conta local"
+            accessibilityLabel="Criar uma nova conta no Satura"
           >
             <Text style={styles.register}>
               Ainda não tem uma conta?{" "}
@@ -174,9 +228,8 @@ export default function LoginScreen() {
             </Text>
           </TouchableOpacity>
 
-          {/* Aviso sobre persistência local */}
           <Text style={styles.academicNotice}>
-            Atividade acadêmica: dados e sessão persistidos localmente no dispositivo (sem envio remoto).
+            Confirme seu e-mail antes do primeiro acesso. Sua sessão é gerenciada pelo Satura.
           </Text>
         </View>
 
@@ -225,6 +278,7 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "center",
     marginBottom: 35,
+    width: "100%",
   },
   logo: {
     ...serifText,
@@ -232,6 +286,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 6,
     color: Colors.primary,
+    maxWidth: "100%",
+    flexShrink: 1,
   },
   subtitle: {
     ...serifText,

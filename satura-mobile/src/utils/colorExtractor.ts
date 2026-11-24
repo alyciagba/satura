@@ -61,7 +61,9 @@ export async function extractPaletteFromImage(
       { compress: 1, format: SaveFormat.JPEG, base64: true }
     );
 
-    if (!manipulated.base64) return fallbackPalette(colorCount);
+    if (!manipulated.base64) {
+      throw new Error("Não foi possível ler os dados da imagem.");
+    }
 
     const decoded = jpeg.decode(decodeBase64(manipulated.base64), { useTArray: true });
     const buckets: Record<string, ColorBucket> = {};
@@ -116,6 +118,6 @@ export async function extractPaletteFromImage(
 
     return pickedColors;
   } catch {
-    return fallbackPalette(colorCount);
+    throw new Error("Não foi possível extrair as cores da imagem.");
   }
 }

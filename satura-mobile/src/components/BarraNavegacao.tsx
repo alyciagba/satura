@@ -1,4 +1,5 @@
 import { usePathname, useRouter } from "expo-router";
+import { Bookmark, House, UserRound, WandSparkles } from "lucide-react-native";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Colors, Fonts } from "@/constants/theme";
 
@@ -15,26 +16,26 @@ export function BarraNavegacao({ savedCount = 0 }: BarraNavegacaoProps) {
       id: "home",
       route: "/home",
       label: "Início",
-      icon: "🏠",
+      icon: House,
     },
     {
       id: "criar",
       route: "/criar_paleta",
       label: "Criar",
-      icon: "✦",
+      icon: WandSparkles,
     },
     {
       id: "salvas",
       route: "/paletas_salvas",
       label: "Salvas",
-      icon: "📑",
+      icon: Bookmark,
       badge: savedCount > 0 ? savedCount : undefined,
     },
     {
       id: "perfil",
       route: "/perfil",
       label: "Perfil",
-      icon: "👤",
+      icon: UserRound,
     },
   ];
 
@@ -62,14 +63,13 @@ export function BarraNavegacao({ savedCount = 0 }: BarraNavegacaoProps) {
             {isActive && <View style={styles.activeIndicator} />}
 
             <View style={styles.iconContainer}>
-              <Text
-                style={[
-                  styles.tabIcon,
-                  isActive && styles.activeTabIcon,
-                ]}
-              >
-                {tab.icon}
-              </Text>
+              <View style={isActive ? styles.activeIcon : undefined}>
+                <tab.icon
+                  size={24}
+                  strokeWidth={2.2}
+                  color={isActive ? Colors.primary : Colors.textMuted}
+                />
+              </View>
               {tab.badge !== undefined && (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>{tab.badge}</Text>
@@ -112,9 +112,11 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     flex: 1,
+    flexShrink: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 4,
+    paddingHorizontal: 2,
     position: "relative",
     minHeight: 48,
   },
@@ -130,22 +132,17 @@ const styles = StyleSheet.create({
     position: "relative",
     marginBottom: 2,
   },
-  tabIcon: {
-    fontSize: 18,
-    color: Colors.textMuted,
-  },
-  activeTabIcon: {
-    color: Colors.primary,
+  activeIcon: {
     transform: [{ scale: 1.1 }],
   },
   badge: {
     position: "absolute",
     top: -4,
     right: -10,
-    backgroundColor: Colors.accentPink,
+    backgroundColor: Colors.accentPinkDark,
     borderRadius: 8,
     minWidth: 16,
-    height: 16,
+    minHeight: 16,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
@@ -161,6 +158,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textMuted,
     fontWeight: "500",
+    flexShrink: 1,
+    textAlign: "center",
   },
   activeTabLabel: {
     color: Colors.primary,

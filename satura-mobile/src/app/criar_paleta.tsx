@@ -2,6 +2,15 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  Camera,
+  ImagePlus,
+  Images,
+  PanelsTopLeft,
+  Shapes,
+  SlidersHorizontal,
+  Zap,
+} from "lucide-react-native";
+import {
   ActivityIndicator,
   Alert,
   Image,
@@ -10,6 +19,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { BarraNavegacao } from "@/components/BarraNavegacao";
 import { Colors, Fonts } from "@/constants/theme";
@@ -20,14 +30,14 @@ import { getClosestColorName } from "@/utils/colors";
 type PaletteOption = {
   title: string;
   description: string;
-  icon: string;
+  icon: string | typeof PanelsTopLeft;
 };
 
 const purposes: PaletteOption[] = [
   {
     title: "Projeto de design",
     description: "Para trabalhos, interfaces digitais e apresentações.",
-    icon: "✦",
+    icon: PanelsTopLeft,
   },
   {
     title: "Meu estilo pessoal",
@@ -47,7 +57,7 @@ const purposes: PaletteOption[] = [
   {
     title: "Outro",
     description: "Quero usar as cores para outra finalidade criativa.",
-    icon: "✧",
+    icon: Shapes,
   },
 ];
 
@@ -60,7 +70,7 @@ const moods: PaletteOption[] = [
   {
     title: "Energia e criatividade",
     description: "Vibração, entusiasmo, dinamismo e alto impacto visual.",
-    icon: "✦",
+    icon: Zap,
   },
   {
     title: "Elegância e sofisticação",
@@ -213,6 +223,7 @@ const DEMO_IMAGE_PRESETS = [
 export default function CriarPaletaScreen() {
   const router = useRouter();
   const { highContrast } = useAppSettings();
+  const { fontScale } = useWindowDimensions();
   const params = useLocalSearchParams<{ mode?: string }>();
   const initialTab = params.mode === "image" ? "imagem" : "preferencias";
 
@@ -332,7 +343,7 @@ export default function CriarPaletaScreen() {
       });
 
       if (!result.canceled && result.assets[0]?.uri) {
-        processSelectedImage(result.assets[0].uri);
+        await processSelectedImage(result.assets[0].uri);
       }
     } catch {
       Alert.alert("Erro", "Não foi possível carregar a imagem da galeria.");
@@ -357,7 +368,7 @@ export default function CriarPaletaScreen() {
       });
 
       if (!result.canceled && result.assets[0]?.uri) {
-        processSelectedImage(result.assets[0].uri);
+        await processSelectedImage(result.assets[0].uri);
       }
     } catch {
       Alert.alert("Erro", "Não foi possível abrir a câmera neste dispositivo.");
@@ -365,12 +376,21 @@ export default function CriarPaletaScreen() {
   }
 
   async function processSelectedImage(uri: string) {
+    const previousImageUri = selectedImageUri;
+    const previousColors = extractedColors;
     setIsExtracting(true);
     setSelectedImageUri(uri);
 
     try {
       const generatedPalette = await extractPaletteFromImage(uri);
       setExtractedColors(generatedPalette);
+    } catch {
+      setSelectedImageUri(previousImageUri);
+      setExtractedColors(previousColors);
+      Alert.alert(
+        "Não foi possível extrair as cores",
+        "Tente outra imagem ou escolha uma das imagens de exemplo."
+      );
     } finally {
       setIsExtracting(false);
     }
@@ -424,11 +444,18 @@ export default function CriarPaletaScreen() {
           accessibilityRole="tab"
           accessibilityState={{ selected: activeTab === "preferencias" }}
         >
-          <Text
-            style={[styles.tabText, activeTab === "preferencias" && styles.activeTabText]}
-          >
-            ✦ Por Preferências
-          </Text>
+          <View style={styles.tabContent}>
+            <SlidersHorizontal
+              size={16}
+              strokeWidth={2.2}
+              color={activeTab === "preferencias" ? Colors.primary : Colors.textSecondary}
+            />
+            <Text
+              style={[styles.tabText, activeTab === "preferencias" && styles.activeTabText]}
+            >
+              Por Preferências
+            </Text>
+          </View>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -437,9 +464,16 @@ export default function CriarPaletaScreen() {
           accessibilityRole="tab"
           accessibilityState={{ selected: activeTab === "imagem" }}
         >
-          <Text style={[styles.tabText, activeTab === "imagem" && styles.activeTabText]}>
-            📸 A partir de Imagem
-          </Text>
+          <View style={styles.tabContent}>
+            <ImagePlus
+              size={16}
+              strokeWidth={2.2}
+              color={activeTab === "imagem" ? Colors.primary : Colors.textSecondary}
+            />
+            <Text style={[styles.tabText, activeTab === "imagem" && styles.activeTabText]}>
+              A partir de Imagem
+            </Text>
+          </View>
         </TouchableOpacity>
       </View>
 
@@ -529,7 +563,11 @@ export default function CriarPaletaScreen() {
                   accessibilityLabel={`${option.title}. ${option.description}`}
                 >
                   <View style={[styles.iconCircle, isSelected && styles.iconCircleSelected]}>
-                    <Text style={styles.icon}>{option.icon}</Text>
+                    {typeof option.icon === "string" ? (
+                      <Text style={styles.icon}>{option.icon}</Text>
+                    ) : (
+                      <option.icon size={22} strokeWidth={2.2} color={Colors.primary} />
+                    )}
                   </View>
                   <View style={styles.optionText}>
                     <Text style={styles.optionTitle}>{option.title}</Text>
@@ -568,24 +606,41 @@ export default function CriarPaletaScreen() {
           </Text>
 
           {/* Botões de Ação de Captura */}
-          <View style={styles.actionButtonsRow}>
+          <View
+            style={[
+              styles.actionButtonsRow,
+              fontScale >= 1.8 && styles.actionButtonsRowScaled,
+            ]}
+          >
             <TouchableOpacity
-              style={styles.mediaActionButton}
+              style={[
+                styles.mediaActionButton,
+                fontScale >= 1.8 && styles.mediaActionButtonScaled,
+                fontScale >= 2.4 && styles.mediaActionButtonVeryLarge,
+              ]}
               onPress={takePhotoWithCamera}
               accessibilityRole="button"
               accessibilityLabel="Tirar foto com a câmera do celular"
             >
-              <Text style={styles.mediaActionIcon}>📷</Text>
+              <View style={styles.mediaActionIcon}>
+                <Camera size={24} strokeWidth={2.2} color={Colors.primary} />
+              </View>
               <Text style={styles.mediaActionText}>Tirar Foto</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.mediaActionButton}
+              style={[
+                styles.mediaActionButton,
+                fontScale >= 1.8 && styles.mediaActionButtonScaled,
+                fontScale >= 2.4 && styles.mediaActionButtonVeryLarge,
+              ]}
               onPress={pickImageFromGallery}
               accessibilityRole="button"
               accessibilityLabel="Escolher imagem da galeria de fotos"
             >
-              <Text style={styles.mediaActionIcon}>🖼️</Text>
+              <View style={styles.mediaActionIcon}>
+                <Images size={24} strokeWidth={2.2} color={Colors.primary} />
+              </View>
               <Text style={styles.mediaActionText}>Abrir Galeria</Text>
             </TouchableOpacity>
           </View>
@@ -640,9 +695,21 @@ export default function CriarPaletaScreen() {
 
           {/* Cores Extraídas em Destaque */}
           <Text style={styles.extractedSectionTitle}>Cores extraídas da imagem:</Text>
-          <View style={styles.extractedSwatches}>
+          <View
+            style={[
+              styles.extractedSwatches,
+              fontScale >= 1.4 && styles.extractedSwatchesScaled,
+            ]}
+          >
             {extractedColors.map((hex, index) => (
-              <View key={`${hex}-${index}`} style={styles.extractedSwatchItem}>
+              <View
+                key={`${hex}-${index}`}
+                style={[
+                  styles.extractedSwatchItem,
+                  fontScale >= 1.4 && styles.extractedSwatchItemScaled,
+                  fontScale >= 2.4 && styles.extractedSwatchItemVeryLarge,
+                ]}
+              >
                 <View style={[styles.extractedSwatchColor, { backgroundColor: hex }]} />
                 <Text style={styles.extractedSwatchHex}>{hex}</Text>
                 <Text style={styles.extractedSwatchName}>{getClosestColorName(hex)}</Text>
@@ -682,14 +749,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    rowGap: 8,
   },
   backButton: {
-    width: 42,
-    height: 42,
+    minWidth: 42,
+    minHeight: 42,
     borderRadius: 14,
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: "#D8D5C7",
     shadowColor: "#000",
@@ -711,6 +782,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 4,
     color: Colors.primary,
+    flexShrink: 1,
   },
   stepIndicator: {
     ...serifText,
@@ -718,6 +790,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.textMuted,
     letterSpacing: 1,
+    flexShrink: 1,
   },
   tabContainer: {
     flexDirection: "row",
@@ -729,9 +802,17 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     flex: 1,
+    minWidth: 0,
     paddingVertical: 10,
     alignItems: "center",
     borderRadius: 11,
+  },
+  tabContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: 6,
   },
   activeTabButton: {
     backgroundColor: Colors.card,
@@ -745,6 +826,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: Colors.textSecondary,
+    flexShrink: 1,
+    textAlign: "center",
   },
   activeTabText: {
     color: Colors.primary,
@@ -772,7 +855,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 2,
-    color: Colors.accentPink,
+    color: Colors.accentPinkDark,
     marginBottom: 8,
   },
   title: {
@@ -824,6 +907,7 @@ const styles = StyleSheet.create({
   },
   optionText: {
     flex: 1,
+    minWidth: 0,
   },
   optionTitle: {
     ...serifText,
@@ -855,11 +939,16 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+    flexShrink: 1,
+    textAlign: "center",
   },
   actionButtonsRow: {
     flexDirection: "row",
     gap: 12,
     marginBottom: 20,
+  },
+  actionButtonsRowScaled: {
+    flexWrap: "wrap",
   },
   mediaActionButton: {
     flex: 1,
@@ -871,8 +960,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  mediaActionButtonScaled: {
+    flexBasis: "47%",
+  },
+  mediaActionButtonVeryLarge: {
+    flexBasis: "100%",
+  },
   mediaActionIcon: {
-    fontSize: 24,
     marginBottom: 6,
   },
   mediaActionText: {
@@ -880,6 +974,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: Colors.primary,
+    flexShrink: 1,
+    textAlign: "center",
   },
   presetLabel: {
     ...serifText,
@@ -923,7 +1019,7 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   extractingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(22, 100, 95, 0.75)",
     alignItems: "center",
     justifyContent: "center",
@@ -944,12 +1040,24 @@ const styles = StyleSheet.create({
   },
   extractedSwatches: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     marginBottom: 14,
   },
+  extractedSwatchesScaled: {
+    justifyContent: "space-between",
+  },
   extractedSwatchItem: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "17%",
+    minWidth: 44,
     alignItems: "center",
+  },
+  extractedSwatchItemScaled: {
+    flexBasis: "47%",
+  },
+  extractedSwatchItemVeryLarge: {
+    flexBasis: "100%",
   },
   extractedSwatchColor: {
     width: "100%",
@@ -964,6 +1072,8 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: Colors.text,
+    flexShrink: 1,
+    textAlign: "center",
   },
   extractedSwatchName: {
     ...serifText,
@@ -971,5 +1081,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: "center",
     marginTop: 2,
+    flexShrink: 1,
   },
 });

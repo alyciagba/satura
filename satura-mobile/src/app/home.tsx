@@ -1,6 +1,8 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { Image, Pipette } from "lucide-react-native";
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -8,39 +10,107 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import {
-  loadSavedPalettes,
-  removeSavedPalette,
-  type SavedPalette,
-} from "@/constants/palettes";
+import type { SavedPalette } from "@/constants/palettes";
 import { Colors, Fonts } from "@/constants/theme";
 import { BarraNavegacao } from "@/components/BarraNavegacao";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
-import { checkSession, getStoredUser } from "@/services/storage";
+import { getCurrentSession } from "@/services/auth";
+import { getSavedPalettes, removeSavedPalette } from "@/services/palettes";
+import { getCurrentProfile } from "@/services/profile";
 import { getPaletteResultParams } from "@/utils/paletteNavigation";
 
 export default function HomeScreen() {
   const router = useRouter();
   const { highContrast } = useAppSettings();
-  const [userName, setUserName] = useState("Gabriela");
+  const [userName, setUserName] = useState<string | null>(null);
   const [palettes, setPalettes] = useState<SavedPalette[]>([]);
+  const [isPalettesLoading, setIsPalettesLoading] = useState(true);
+  const [palettesError, setPalettesError] = useState<string | null>(null);
+  const isFocusedRef = useRef(false);
+  const isDeletingRef = useRef(false);
+  const paletteLoadVersionRef = useRef(0);
+
+  const loadPalettes = useCallback(async () => {
+    const loadVersion = ++paletteLoadVersionRef.current;
+    setIsPalettesLoading(true);
+    setPalettesError(null);
+    setPalettes([]);
+
+    try {
+      const result = await getSavedPalettes();
+      if (!isFocusedRef.current || loadVersion !== paletteLoadVersionRef.current) return;
+
+      if (result.error || !result.data) {
+        setPalettesError("Não foi possível carregar suas paletas. Verifique sua conexão e tente novamente.");
+        return;
+      }
+
+      setPalettes(result.data);
+    } catch {
+      if (isFocusedRef.current && loadVersion === paletteLoadVersionRef.current) {
+        setPalettesError("Não foi possível carregar suas paletas. Verifique sua conexão e tente novamente.");
+      }
+    } finally {
+      if (isFocusedRef.current && loadVersion === paletteLoadVersionRef.current) {
+        setIsPalettesLoading(false);
+      }
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      // Carrega usuário atual
-      checkSession().then((session: { email: string; name: string } | null) => {
-        if (session?.name) {
-          setUserName(session.name);
-        } else {
-          getStoredUser().then((u: { name: string; email: string } | null) => {
-            if (u?.name) setUserName(u.name);
-          });
-        }
-      });
+      let isActive = true;
+      isFocusedRef.current = true;
+      setUserName(null);
+      void loadPalettes();
 
-      // Carrega paletas salvas
-      void loadSavedPalettes().then(setPalettes);
-    }, [])
+      async function loadHomeData() {
+        try {
+          const sessionResult = await getCurrentSession();
+          if (!isActive) return;
+
+          if (sessionResult.error) {
+            Alert.alert("Não foi possível verificar a sessão", sessionResult.error.message);
+            return;
+          }
+
+          if (!sessionResult.data) {
+            router.replace("/");
+            return;
+          }
+
+          const profileResult = await getCurrentProfile();
+          if (!isActive) return;
+
+          if (profileResult.error) {
+            Alert.alert("Não foi possível carregar o perfil", profileResult.error.message);
+          } else {
+            const name = profileResult.data?.name.trim();
+            if (name) {
+              setUserName(name);
+            } else {
+              Alert.alert(
+                "Perfil indisponível",
+                "Sua sessão está ativa, mas o perfil não foi encontrado."
+              );
+            }
+          }
+
+        } catch {
+          if (isActive) {
+            Alert.alert("Não foi possível carregar a Home", "Tente novamente mais tarde.");
+          }
+        }
+      }
+
+      void loadHomeData();
+
+      return () => {
+        isActive = false;
+        isFocusedRef.current = false;
+        paletteLoadVersionRef.current += 1;
+      };
+    }, [loadPalettes, router])
   );
 
   function confirmDelete(palette: SavedPalette) {
@@ -52,16 +122,48 @@ export default function HomeScreen() {
         {
           text: "Excluir",
           style: "destructive",
-          onPress: async () => {
-            const remaining = await removeSavedPalette(palette.id);
-            setPalettes(remaining);
+          onPress: () => {
+            void handleDeletePalette(palette.id);
           },
         },
       ]
     );
   }
 
-  const initialLetter = (userName || "S").trim().charAt(0).toUpperCase();
+  async function handleDeletePalette(id: string) {
+    if (isDeletingRef.current) return;
+
+    isDeletingRef.current = true;
+    const operationVersion = ++paletteLoadVersionRef.current;
+
+    try {
+      const result = await removeSavedPalette(id);
+      if (
+        !isFocusedRef.current ||
+        operationVersion !== paletteLoadVersionRef.current
+      ) {
+        return;
+      }
+
+      if (result.error || result.data === null) {
+        Alert.alert(
+          "Não foi possível excluir a paleta",
+          result.error?.message ?? "Tente novamente mais tarde."
+        );
+        return;
+      }
+
+      setPalettes((current) => current.filter((palette) => palette.id !== id));
+    } catch {
+      if (isFocusedRef.current) {
+        Alert.alert("Não foi possível excluir a paleta", "Tente novamente mais tarde.");
+      }
+    } finally {
+      isDeletingRef.current = false;
+    }
+  }
+
+  const initialLetter = userName?.trim().charAt(0).toUpperCase() || "S";
 
   return (
     <View style={{ flex: 1, backgroundColor: highContrast ? "#FFFFFF" : Colors.background }}>
@@ -72,18 +174,20 @@ export default function HomeScreen() {
       >
       {/* Cabeçalho */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerText}>
           <Text style={styles.logo} accessibilityRole="header">
             SATURA
           </Text>
-          <Text style={styles.greeting}>Olá, {userName}! ✨</Text>
+          <Text style={styles.greeting}>
+            Olá{userName ? `, ${userName}` : ""}! ✨
+          </Text>
         </View>
 
         <TouchableOpacity
           style={styles.profileButton}
           onPress={() => router.push("/perfil")}
           accessibilityRole="button"
-          accessibilityLabel={`Abrir perfil de ${userName}`}
+          accessibilityLabel={`Abrir perfil${userName ? ` de ${userName}` : ""}`}
         >
           <Text style={styles.profileText}>{initialLetter}</Text>
         </TouchableOpacity>
@@ -123,7 +227,7 @@ export default function HomeScreen() {
         accessibilityLabel="Extrair paleta a partir de uma foto ou imagem da galeria"
       >
         <View style={styles.imageCardIcon}>
-          <Text style={styles.cameraIcon}>📸</Text>
+          <Pipette size={22} strokeWidth={2.2} color={Colors.primary} />
         </View>
         <View style={styles.imageCardContent}>
           <Text style={styles.imageCardTitle}>Extrair cores de imagem</Text>
@@ -154,22 +258,47 @@ export default function HomeScreen() {
       </View>
 
       {palettes.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Nenhuma paleta salva ainda</Text>
-          <Text style={styles.emptyText}>
-            Toque nos botões acima para criar sua primeira combinação harmônica!
-          </Text>
-        </View>
+        isPalettesLoading ? (
+          <View style={styles.statusCard}>
+            <ActivityIndicator color={Colors.primary} />
+            <Text style={styles.statusText}>Carregando suas paletas...</Text>
+          </View>
+        ) : palettesError ? (
+          <View style={styles.statusCard}>
+            <Text style={styles.errorTitle}>Não foi possível carregar as paletas</Text>
+            <Text style={styles.statusText}>{palettesError}</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => void loadPalettes()}
+              accessibilityRole="button"
+              accessibilityLabel="Tentar carregar as paletas novamente"
+            >
+              <Text style={styles.retryButtonText}>Tentar novamente</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Nenhuma paleta salva ainda</Text>
+            <Text style={styles.emptyText}>
+              Toque nos botões acima para criar sua primeira combinação harmônica!
+            </Text>
+          </View>
+        )
       ) : (
         palettes.slice(0, 3).map((palette) => (
           <View key={palette.id} style={styles.paletteCard}>
             <View style={styles.paletteCardHeader}>
-              <View style={{ flex: 1 }}>
+              <View style={styles.paletteCardTitle}>
                 <Text style={styles.paletteName}>{palette.name}</Text>
-                <Text style={styles.paletteDescription}>
-                  {palette.source === "imagem" ? "📷 Extraída de imagem" : palette.mood} • Salva em{" "}
-                  {new Date(palette.savedAt).toLocaleDateString("pt-BR")}
-                </Text>
+                <View style={styles.paletteDescriptionRow}>
+                  {palette.source === "imagem" && (
+                    <Image size={14} strokeWidth={2.2} color={Colors.textMuted} />
+                  )}
+                  <Text style={styles.paletteDescription}>
+                    {palette.source === "imagem" ? "Extraída de imagem" : palette.mood} • Salva em{" "}
+                    {new Date(palette.savedAt).toLocaleDateString("pt-BR")}
+                  </Text>
+                </View>
               </View>
 
               <TouchableOpacity
@@ -224,7 +353,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
+    rowGap: 8,
     marginBottom: 30,
+  },
+  headerText: {
+    flex: 1,
+    minWidth: 0,
   },
   logo: {
     ...serifText,
@@ -232,6 +367,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 4,
     color: Colors.primary,
+    flexShrink: 1,
   },
   greeting: {
     ...serifText,
@@ -240,12 +376,13 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   profileButton: {
-    width: 46,
-    height: 46,
+    minWidth: 46,
+    minHeight: 46,
     borderRadius: 23,
     backgroundColor: Colors.card,
     alignItems: "center",
     justifyContent: "center",
+    padding: 8,
     borderWidth: 1,
     borderColor: Colors.border,
   },
@@ -254,6 +391,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: Colors.primary,
+    flexShrink: 1,
   },
   hero: {
     backgroundColor: Colors.card,
@@ -313,6 +451,8 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
+    flexShrink: 1,
+    textAlign: "center",
   },
   imageCard: {
     backgroundColor: "#F9F8F2",
@@ -333,11 +473,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 14,
   },
-  cameraIcon: {
-    fontSize: 22,
-  },
   imageCardContent: {
     flex: 1,
+    minWidth: 0,
   },
   imageCardTitle: {
     ...serifText,
@@ -353,8 +491,8 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   imageCardArrowContainer: {
-    width: 36,
-    height: 36,
+    minWidth: 36,
+    minHeight: 36,
     borderRadius: 12,
     backgroundColor: "rgba(22, 100, 95, 0.12)",
     alignItems: "center",
@@ -372,6 +510,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
+    rowGap: 4,
     marginBottom: 15,
   },
   sectionTitle: {
@@ -383,6 +523,7 @@ const styles = StyleSheet.create({
   seeAllButton: {
     minHeight: 44,
     justifyContent: "center",
+    flexShrink: 1,
   },
   seeAll: {
     ...serifText,
@@ -395,6 +536,44 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     alignItems: "center",
+  },
+  statusCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  statusText: {
+    ...serifText,
+    fontSize: 13,
+    lineHeight: 19,
+    color: Colors.textSecondary,
+    textAlign: "center",
+  },
+  errorTitle: {
+    ...serifText,
+    fontSize: 16,
+    fontWeight: "700",
+    color: Colors.error,
+    textAlign: "center",
+  },
+  retryButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  retryButtonText: {
+    ...serifText,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
   emptyTitle: {
     ...serifText,
@@ -448,11 +627,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: Colors.text,
+    flexShrink: 1,
+  },
+  paletteCardTitle: {
+    flex: 1,
+    minWidth: 0,
   },
   paletteDescription: {
     ...serifText,
     fontSize: 12,
     color: Colors.textMuted,
     marginTop: 3,
+    flexShrink: 1,
+  },
+  paletteDescriptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
 });

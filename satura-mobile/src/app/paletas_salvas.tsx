@@ -1,7 +1,9 @@
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { Image } from "lucide-react-native";
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   ScrollView,
@@ -12,33 +14,96 @@ import {
   View,
 } from "react-native";
 import {
-  loadSavedPalettes,
-  removeSavedPalette,
   type SavedPalette,
 } from "@/constants/palettes";
 import { BarraNavegacao } from "@/components/BarraNavegacao";
 import { Colors, Fonts } from "@/constants/theme";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
+import { getSavedPalettes, removeSavedPalette } from "@/services/palettes";
 import { getPaletteResultParams } from "@/utils/paletteNavigation";
 
 export default function PaletasSalvasScreen() {
   const router = useRouter();
   const { highContrast } = useAppSettings();
   const [palettes, setPalettes] = useState<SavedPalette[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [paletteToDelete, setPaletteToDelete] = useState<SavedPalette | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const isDeletingRef = useRef(false);
+  const isFocusedRef = useRef(false);
+  const loadVersionRef = useRef(0);
+
+  const loadPalettes = useCallback(async () => {
+    const loadVersion = ++loadVersionRef.current;
+    setIsLoading(true);
+    setLoadError(null);
+    setPalettes([]);
+
+    try {
+      const result = await getSavedPalettes();
+      if (!isFocusedRef.current || loadVersion !== loadVersionRef.current) return;
+
+      if (result.error || !result.data) {
+        setLoadError("Não foi possível carregar suas paletas. Verifique sua conexão e tente novamente.");
+        return;
+      }
+
+      setPalettes(result.data);
+    } catch {
+      if (isFocusedRef.current && loadVersion === loadVersionRef.current) {
+        setLoadError("Não foi possível carregar suas paletas. Verifique sua conexão e tente novamente.");
+      }
+    } finally {
+      if (isFocusedRef.current && loadVersion === loadVersionRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadSavedPalettes().then(setPalettes);
-    }, [])
+      isFocusedRef.current = true;
+      setPalettes([]);
+      void loadPalettes();
+
+      return () => {
+        isFocusedRef.current = false;
+        loadVersionRef.current += 1;
+      };
+    }, [loadPalettes])
   );
 
   async function handleDeletePalette(id: string) {
-    const remaining = await removeSavedPalette(id);
-    setPalettes(remaining);
-    setPaletteToDelete(null);
+    if (isDeletingRef.current) return;
+
+    isDeletingRef.current = true;
+    setIsDeleting(true);
+
+    try {
+      const result = await removeSavedPalette(id);
+      if (result.error || result.data === null) {
+        Alert.alert(
+          "Não foi possível excluir a paleta",
+          result.error?.message ?? "Tente novamente mais tarde."
+        );
+        return;
+      }
+
+      setPalettes((current) => current.filter((palette) => palette.id !== id));
+      setPaletteToDelete(null);
+      Alert.alert("Paleta excluída", "A paleta foi removida das suas paletas salvas.");
+    } catch {
+      Alert.alert(
+        "Não foi possível excluir a paleta",
+        "Tente novamente mais tarde."
+      );
+    } finally {
+      isDeletingRef.current = false;
+      setIsDeleting(false);
+    }
   }
 
   async function copyColor(hex: string) {
@@ -87,12 +152,12 @@ export default function PaletasSalvasScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.eyebrow}>SUA COLEÇÃO LOCAL</Text>
+        <Text style={styles.eyebrow}>SUAS PALETAS</Text>
         <Text style={styles.title} accessibilityRole="header">
           Minhas paletas
         </Text>
         <Text style={styles.subtitle}>
-          Todas as combinações salvas no seu aparelho, organizadas para seus projetos.
+          Paletas salvas na sua conta, organizadas para seus projetos.
         </Text>
 
         {/* Campo de busca se houver paletas */}
@@ -108,7 +173,25 @@ export default function PaletasSalvasScreen() {
         )}
 
         {/* Estado vazio */}
-        {filteredPalettes.length === 0 ? (
+        {isLoading ? (
+          <View style={styles.statusState}>
+            <ActivityIndicator color={Colors.primary} />
+            <Text style={styles.statusText}>Carregando suas paletas...</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.statusState}>
+            <Text style={styles.errorTitle}>Não foi possível carregar as paletas</Text>
+            <Text style={styles.statusText}>{loadError}</Text>
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={() => void loadPalettes()}
+              accessibilityRole="button"
+              accessibilityLabel="Tentar carregar as paletas novamente"
+            >
+              <Text style={styles.createButtonText}>Tentar novamente</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filteredPalettes.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={styles.emptySwatches} accessible={false}>
               <View style={[styles.emptySwatch, { backgroundColor: Colors.primary }]} />
@@ -144,10 +227,15 @@ export default function PaletasSalvasScreen() {
                 <View style={styles.cardHeader}>
                   <View style={styles.cardTitleArea}>
                     <Text style={styles.paletteName}>{palette.name}</Text>
-                    <Text style={styles.paletteDate}>
-                      {palette.source === "imagem" ? "📸 Fotografia" : palette.purpose} •{" "}
-                      {new Date(palette.savedAt).toLocaleDateString("pt-BR")}
-                    </Text>
+                    <View style={styles.paletteSourceRow}>
+                      {palette.source === "imagem" && (
+                        <Image size={16} strokeWidth={2.2} color={Colors.textMuted} />
+                      )}
+                      <Text style={styles.paletteDate}>
+                        {palette.source === "imagem" ? "Fotografia" : palette.purpose} •{" "}
+                        {new Date(palette.savedAt).toLocaleDateString("pt-BR")}
+                      </Text>
+                    </View>
                   </View>
 
                   <TouchableOpacity
@@ -234,31 +322,39 @@ export default function PaletasSalvasScreen() {
         onRequestClose={() => setPaletteToDelete(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalIcon}>🗑️</Text>
-            <Text style={styles.modalTitle}>Excluir paleta?</Text>
-            <Text style={styles.modalDescription}>
-              Deseja realmente remover "{paletteToDelete?.name}" das suas paletas salvas? Esta ação removerá a combinação deste aparelho.
-            </Text>
+          <ScrollView
+            style={styles.modalScrollView}
+            contentContainerStyle={styles.modalScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalIcon}>🗑️</Text>
+              <Text style={styles.modalTitle}>Excluir paleta?</Text>
+              <Text style={styles.modalDescription}>
+                Deseja realmente remover "{paletteToDelete?.name}" das suas paletas salvas da sua conta?
+              </Text>
 
-            <TouchableOpacity
-              style={styles.modalDeleteButton}
-              onPress={() => paletteToDelete && handleDeletePalette(paletteToDelete.id)}
-              accessibilityRole="button"
-              accessibilityLabel="Confirmar exclusão da paleta"
-            >
-              <Text style={styles.modalDeleteButtonText}>Sim, excluir paleta</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalDeleteButton}
+                onPress={() => paletteToDelete && handleDeletePalette(paletteToDelete.id)}
+                disabled={isDeleting}
+                accessibilityRole="button"
+                accessibilityLabel="Confirmar exclusão da paleta"
+                accessibilityState={{ busy: isDeleting }}
+              >
+                <Text style={styles.modalDeleteButtonText}>Sim, excluir paleta</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.modalCancelButton}
-              onPress={() => setPaletteToDelete(null)}
-              accessibilityRole="button"
-              accessibilityLabel="Cancelar exclusão"
-            >
-              <Text style={styles.modalCancelButtonText}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setPaletteToDelete(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancelar exclusão"
+              >
+                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -283,14 +379,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    rowGap: 8,
   },
   backButton: {
-    width: 42,
-    height: 42,
+    minWidth: 42,
+    minHeight: 42,
     borderRadius: 14,
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: "#D8D5C7",
     shadowColor: "#000",
@@ -312,6 +412,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 4,
     color: Colors.primary,
+    flexShrink: 1,
   },
   newButton: {
     backgroundColor: Colors.primary,
@@ -335,7 +436,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 2,
-    color: Colors.accentPink,
+    color: Colors.accentPinkDark,
     marginBottom: 8,
   },
   title: {
@@ -373,6 +474,30 @@ const styles = StyleSheet.create({
     marginTop: 10,
     borderWidth: 1,
     borderColor: "#E5E3D5",
+  },
+  statusState: {
+    backgroundColor: Colors.card,
+    borderRadius: 22,
+    padding: 28,
+    alignItems: "center",
+    gap: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  statusText: {
+    ...serifText,
+    fontSize: 14,
+    lineHeight: 21,
+    color: Colors.textSecondary,
+    textAlign: "center",
+  },
+  errorTitle: {
+    ...serifText,
+    fontSize: 16,
+    fontWeight: "700",
+    color: Colors.error,
+    textAlign: "center",
   },
   emptySwatches: {
     flexDirection: "row",
@@ -430,6 +555,7 @@ const styles = StyleSheet.create({
   },
   cardTitleArea: {
     flex: 1,
+    minWidth: 0,
   },
   paletteName: {
     ...serifText,
@@ -442,6 +568,13 @@ const styles = StyleSheet.create({
     ...serifText,
     fontSize: 12,
     color: Colors.textMuted,
+    flexShrink: 1,
+  },
+  paletteSourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 1,
+    gap: 4,
   },
   deleteButton: {
     minHeight: 36,
@@ -502,6 +635,7 @@ const styles = StyleSheet.create({
   },
   detailRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
   },
   detailSwatch: {
@@ -514,6 +648,7 @@ const styles = StyleSheet.create({
   },
   detailInfo: {
     flex: 1,
+    minWidth: 0,
   },
   detailName: {
     ...serifText,
@@ -545,11 +680,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
+  modalScrollView: {
+    maxHeight: "100%",
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
   modalCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 24,
     alignItems: "center",
+    width: "100%",
   },
   modalIcon: {
     fontSize: 32,
